@@ -1,47 +1,25 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use eframe::egui;
-use std::fs;
-use std::path::PathBuf;
-
-const MAX_HISTORY: usize = 10;
-
-fn history_path() -> PathBuf {
-    let mut path = std::env::current_exe().unwrap_or_default();
-    path.set_file_name("calc_history.txt");
-    path
-}
-
-fn load_history() -> Vec<HistoryEntry> {
-    let path = history_path();
-    let Ok(contents) = fs::read_to_string(&path) else {
-        return Vec::new();
-    };
-    contents
-        .lines()
-        .filter_map(|line| {
-            let (expr, result) = line.split_once('\t')?;
-            Some(HistoryEntry {
-                expression: expr.to_string(),
-                result: result.to_string(),
-            })
-        })
-        .collect()
-}
-
-fn save_history(history: &[HistoryEntry]) {
-    let path = history_path();
-    let content: String = history
-        .iter()
-        .map(|e| format!("{}\t{}", e.expression, e.result))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let _ = fs::write(&path, content);
-}
+use calculator::CalcApp as LibCalcApp;
+use calculator::save_history;
 
 const CALC_WIDTH: f32 = 320.0;
 const HISTORY_WIDTH: f32 = 230.0;
 const WINDOW_HEIGHT: f32 = 500.0;
+
+// Wrapper type to implement eframe::App for CalcApp
+struct CalcApp {
+    inner: LibCalcApp,
+}
+
+impl CalcApp {
+    fn new() -> Self {
+        Self {
+            inner: LibCalcApp::new(),
+        }
+    }
+}
 
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
@@ -58,206 +36,6 @@ fn main() -> eframe::Result {
     )
 }
 
-struct HistoryEntry {
-    expression: String,
-    result: String,
-}
-
-struct CalcApp {
-    display: String,
-    expression: String,
-    first_operand: Option<f64>,
-    operator: Option<char>,
-    waiting_for_second: bool,
-    just_computed: bool,
-    history: Vec<HistoryEntry>,
-    show_history: bool,
-}
-
-impl CalcApp {
-    fn new() -> Self {
-        Self {
-            display: "0".to_string(),
-            expression: String::new(),
-            first_operand: None,
-            operator: None,
-            waiting_for_second: false,
-            just_computed: false,
-            history: load_history(),
-            show_history: false,
-        }
-    }
-
-    fn add_history(&mut self, expression: String, result: String) {
-        self.history.push(HistoryEntry { expression, result });
-        if self.history.len() > MAX_HISTORY {
-            self.history.remove(0);
-        }
-        save_history(&self.history);
-    }
-}
-
-impl CalcApp {
-    fn input_digit(&mut self, d: char) {
-        if self.just_computed {
-            self.clear_state();
-            self.just_computed = false;
-        }
-        if self.waiting_for_second {
-            self.display = d.to_string();
-            self.waiting_for_second = false;
-        } else if self.display == "0" {
-            self.display = d.to_string();
-        } else {
-            self.display.push(d);
-        }
-    }
-
-    fn input_dot(&mut self) {
-        if self.just_computed {
-            self.clear_state();
-            self.just_computed = false;
-        }
-        if self.waiting_for_second {
-            self.display = "0.".to_string();
-            self.waiting_for_second = false;
-        } else if !self.display.contains('.') {
-            self.display.push('.');
-        }
-    }
-
-    fn op_symbol(op: char) -> &'static str {
-        match op {
-            '+' => "+",
-            '-' => "-",
-            '*' => "\u{00D7}",
-            '/' => "\u{00F7}",
-            _ => "?",
-        }
-    }
-
-    fn input_operator(&mut self, op: char) {
-        if self.display == "Error" {
-            return;
-        }
-        if let Ok(val) = self.display.parse::<f64>() {
-            if self.first_operand.is_some() && !self.waiting_for_second {
-                self.compute();
-                if self.display == "Error" {
-                    return;
-                }
-            }
-            let current: f64 = self.display.parse().unwrap_or(val);
-            self.expression = format!("{} {}", format_number(current), Self::op_symbol(op));
-            self.first_operand = Some(current);
-            self.operator = Some(op);
-            self.waiting_for_second = true;
-            self.just_computed = false;
-        }
-    }
-
-    fn compute(&mut self) {
-        if let (Some(a), Some(op)) = (self.first_operand, self.operator) {
-            if let Ok(b) = self.display.parse::<f64>() {
-                let expr = format!(
-                    "{} {} {}",
-                    format_number(a),
-                    Self::op_symbol(op),
-                    format_number(b)
-                );
-                self.expression = format!("{} =", expr);
-                let result = match op {
-                    '+' => Some(a + b),
-                    '-' => Some(a - b),
-                    '*' => Some(a * b),
-                    '/' => {
-                        if b == 0.0 {
-                            None
-                        } else {
-                            Some(a / b)
-                        }
-                    }
-                    _ => Some(0.0),
-                };
-                match result {
-                    Some(r) => {
-                        let result_str = format_number(r);
-                        self.add_history(expr, result_str.clone());
-                        self.display = result_str;
-                    }
-                    None => {
-                        self.display = "Error".to_string();
-                        self.expression = "Cannot divide by zero".to_string();
-                    }
-                }
-                self.first_operand = None;
-                self.operator = None;
-                self.waiting_for_second = false;
-                self.just_computed = true;
-            }
-        }
-    }
-
-    fn clear_state(&mut self) {
-        self.display = "0".to_string();
-        self.expression.clear();
-        self.first_operand = None;
-        self.operator = None;
-        self.waiting_for_second = false;
-        self.just_computed = false;
-    }
-
-    fn clear(&mut self) {
-        self.clear_state();
-    }
-
-    fn clear_entry(&mut self) {
-        self.display = "0".to_string();
-    }
-
-    fn backspace(&mut self) {
-        if self.display == "Error" || self.just_computed {
-            return;
-        }
-        if self.display.len() > 1 {
-            self.display.pop();
-        } else {
-            self.display = "0".to_string();
-        }
-    }
-
-    fn toggle_sign(&mut self) {
-        if self.display == "Error" || self.display == "0" {
-            return;
-        }
-        if self.display.starts_with('-') {
-            self.display.remove(0);
-        } else {
-            self.display.insert(0, '-');
-        }
-    }
-
-    fn percent(&mut self) {
-        if let Ok(val) = self.display.parse::<f64>() {
-            self.display = format_number(val / 100.0);
-        }
-    }
-}
-
-fn format_number(n: f64) -> String {
-    if n.is_nan() || n.is_infinite() {
-        return "Error".to_string();
-    }
-    if n == n.floor() && n.abs() < 1e15 {
-        format!("{}", n as i64)
-    } else {
-        let s = format!("{:.10}", n);
-        let s = s.trim_end_matches('0');
-        let s = s.trim_end_matches('.');
-        s.to_string()
-    }
-}
-
 impl eframe::App for CalcApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let bg = egui::Color32::from_rgb(32, 32, 32);
@@ -271,7 +49,7 @@ impl eframe::App for CalcApp {
         let divider_color = egui::Color32::from_rgb(55, 55, 55);
 
         // --- Right side panel: History (collapsible) ---
-        if self.show_history {
+        if self.inner.show_history {
             let target_w = CALC_WIDTH + HISTORY_WIDTH;
             ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(target_w, WINDOW_HEIGHT)));
 
@@ -295,16 +73,16 @@ impl eframe::App for CalcApp {
                                 egui::Button::new(egui::RichText::new("<<").size(14.0).color(text_gray))
                                     .fill(egui::Color32::TRANSPARENT),
                             ).clicked() {
-                                self.show_history = false;
+                                self.inner.show_history = false;
                             }
-                            if !self.history.is_empty() {
+                            if !self.inner.history.is_empty() {
                                 if ui.add(
                                     egui::Button::new(egui::RichText::new("Clear").size(12.0).color(text_gray))
                                         .fill(op_bg)
                                         .rounding(4.0),
                                 ).clicked() {
-                                    self.history.clear();
-                                    save_history(&self.history);
+                                    self.inner.history.clear();
+                                    save_history(&self.inner.history);
                                 }
                             }
                         });
@@ -321,7 +99,7 @@ impl eframe::App for CalcApp {
                     );
                     ui.add_space(6.0);
 
-                    if self.history.is_empty() {
+                    if self.inner.history.is_empty() {
                         ui.add_space(30.0);
                         ui.vertical_centered(|ui| {
                             ui.label(
@@ -335,7 +113,7 @@ impl eframe::App for CalcApp {
                             .auto_shrink([false, false])
                             .stick_to_bottom(true)
                             .show(ui, |ui| {
-                                for entry in self.history.iter().rev() {
+                                for entry in self.inner.history.iter().rev() {
                                     egui::Frame::default()
                                         .fill(history_bg)
                                         .rounding(4.0)
@@ -386,37 +164,37 @@ impl eframe::App for CalcApp {
             ui.vertical(|ui| {
                 // History toggle button row
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                    let label = if self.show_history { "History <<" } else { "History >>" };
+                    let label = if self.inner.show_history { "History <<" } else { "History >>" };
                     if ui.add(
                         egui::Button::new(
                             egui::RichText::new(label).size(12.0).color(text_gray),
                         )
                         .fill(egui::Color32::TRANSPARENT),
                     ).clicked() {
-                        self.show_history = !self.show_history;
+                        self.inner.show_history = !self.inner.show_history;
                     }
                 });
 
                 // Expression line (right-aligned)
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
                     ui.label(
-                        egui::RichText::new(&self.expression)
+                        egui::RichText::new(&self.inner.expression)
                             .size(14.0)
                             .color(text_gray),
                     );
                 });
 
                 // Main display (right-aligned, large)
-                let display_size = if self.display.len() > 12 {
+                let display_size = if self.inner.display.len() > 12 {
                     24.0
-                } else if self.display.len() > 8 {
+                } else if self.inner.display.len() > 8 {
                     32.0
                 } else {
                     46.0
                 };
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
                     ui.label(
-                        egui::RichText::new(&self.display)
+                        egui::RichText::new(&self.inner.display)
                             .size(display_size)
                             .color(text_white)
                             .strong(),
@@ -454,87 +232,87 @@ impl eframe::App for CalcApp {
 
             // Row 1: %  CE  C  DEL
             ui.horizontal(|ui| {
-                if make_btn(ui, "%", btn, op_bg, text_white) { self.percent(); }
-                if make_btn(ui, "CE", btn, op_bg, text_white) { self.clear_entry(); }
-                if make_btn(ui, "C", btn, op_bg, text_white) { self.clear(); }
-                if make_btn(ui, "DEL", btn, op_bg, text_white) { self.backspace(); }
+                if make_btn(ui, "%", btn, op_bg, text_white) { self.inner.percent(); }
+                if make_btn(ui, "CE", btn, op_bg, text_white) { self.inner.clear_entry(); }
+                if make_btn(ui, "C", btn, op_bg, text_white) { self.inner.clear(); }
+                if make_btn(ui, "DEL", btn, op_bg, text_white) { self.inner.backspace(); }
             });
 
             // Row 2: 1/x  x²  √x  ÷
             ui.horizontal(|ui| {
                 if make_btn(ui, "1/x", btn, op_bg, text_white) {
-                    if let Ok(val) = self.display.parse::<f64>() {
+                    if let Ok(val) = self.inner.display.parse::<f64>() {
                         if val == 0.0 {
-                            self.display = "Error".to_string();
-                            self.expression = "Cannot divide by zero".to_string();
+                            self.inner.display = "Error".to_string();
+                            self.inner.expression = "Cannot divide by zero".to_string();
                         } else {
-                            let result = format_number(1.0 / val);
-                            let expr = format!("1/({})", format_number(val));
-                            self.add_history(expr.clone(), result.clone());
-                            self.expression = expr;
-                            self.display = result;
-                            self.just_computed = true;
+                            let result = calculator::format_number(1.0 / val);
+                            let expr = format!("1/({})", calculator::format_number(val));
+                            self.inner.add_history(expr.clone(), result.clone());
+                            self.inner.expression = expr;
+                            self.inner.display = result;
+                            self.inner.just_computed = true;
                         }
                     }
                 }
                 if make_btn(ui, "x\u{00B2}", btn, op_bg, text_white) {
-                    if let Ok(val) = self.display.parse::<f64>() {
-                        let result = format_number(val * val);
-                        let expr = format!("sqr({})", format_number(val));
-                        self.add_history(expr.clone(), result.clone());
-                        self.expression = expr;
-                        self.display = result;
-                        self.just_computed = true;
+                    if let Ok(val) = self.inner.display.parse::<f64>() {
+                        let result = calculator::format_number(val * val);
+                        let expr = format!("sqr({})", calculator::format_number(val));
+                        self.inner.add_history(expr.clone(), result.clone());
+                        self.inner.expression = expr;
+                        self.inner.display = result;
+                        self.inner.just_computed = true;
                     }
                 }
                 if make_btn(ui, "\u{221A}x", btn, op_bg, text_white) {
-                    if let Ok(val) = self.display.parse::<f64>() {
+                    if let Ok(val) = self.inner.display.parse::<f64>() {
                         if val < 0.0 {
-                            self.display = "Error".to_string();
-                            self.expression = "Invalid input".to_string();
+                            self.inner.display = "Error".to_string();
+                            self.inner.expression = "Invalid input".to_string();
                         } else {
-                            let result = format_number(val.sqrt());
-                            let expr = format!("\u{221A}({})", format_number(val));
-                            self.add_history(expr.clone(), result.clone());
-                            self.expression = expr;
-                            self.display = result;
-                            self.just_computed = true;
+                            let result = calculator::format_number(val.sqrt());
+                            let expr = format!("\u{221A}({})", calculator::format_number(val));
+                            self.inner.add_history(expr.clone(), result.clone());
+                            self.inner.expression = expr;
+                            self.inner.display = result;
+                            self.inner.just_computed = true;
                         }
                     }
                 }
-                if make_btn(ui, "\u{00F7}", btn, op_bg, text_white) { self.input_operator('/'); }
+                if make_btn(ui, "\u{00F7}", btn, op_bg, text_white) { self.inner.input_operator('/'); }
             });
 
             // Row 3: 7  8  9  ×
             ui.horizontal(|ui| {
                 for d in ['7', '8', '9'] {
-                    if make_btn(ui, &d.to_string(), btn, num_bg, text_white) { self.input_digit(d); }
+                    if make_btn(ui, &d.to_string(), btn, num_bg, text_white) { self.inner.input_digit(d); }
                 }
-                if make_btn(ui, "\u{00D7}", btn, op_bg, text_white) { self.input_operator('*'); }
+                if make_btn(ui, "\u{00D7}", btn, op_bg, text_white) { self.inner.input_operator('*'); }
             });
 
             // Row 4: 4  5  6  −
             ui.horizontal(|ui| {
                 for d in ['4', '5', '6'] {
-                    if make_btn(ui, &d.to_string(), btn, num_bg, text_white) { self.input_digit(d); }
+                    if make_btn(ui, &d.to_string(), btn, num_bg, text_white) { self.inner.input_digit(d); }
                 }
-                if make_btn(ui, "\u{2212}", btn, op_bg, text_white) { self.input_operator('-'); }
+                if make_btn(ui, "\u{2212}", btn, op_bg, text_white) { self.inner.input_operator('-'); }
             });
 
             // Row 5: 1  2  3  +
             ui.horizontal(|ui| {
                 for d in ['1', '2', '3'] {
-                    if make_btn(ui, &d.to_string(), btn, num_bg, text_white) { self.input_digit(d); }
+                    if make_btn(ui, &d.to_string(), btn, num_bg, text_white) { self.inner.input_digit(d); }
                 }
-                if make_btn(ui, "+", btn, op_bg, text_white) { self.input_operator('+'); }
+                if make_btn(ui, "+", btn, op_bg, text_white) { self.inner.input_operator('+'); }
             });
 
             // Row 6: ±  0  .  =
             ui.horizontal(|ui| {
-                if make_btn(ui, "+/-", btn, op_bg, text_white) { self.toggle_sign(); }
-                if make_btn(ui, "0", btn, num_bg, text_white) { self.input_digit('0'); }
-                if make_btn(ui, ".", btn, num_bg, text_white) { self.input_dot(); }
-                if make_btn(ui, "=", btn, eq_bg, text_dark) { self.compute(); }
+                if make_btn(ui, "+/-", btn, op_bg, text_white) { self.inner.toggle_sign(); }
+                if make_btn(ui, "0", btn, num_bg, text_white) { self.inner.input_digit('0'); }
+                if make_btn(ui, ".", btn, num_bg, text_white) { self.inner.input_dot(); }
+                if make_btn(ui, "=", btn, eq_bg, text_dark) { self.inner.compute(); }
             });
         });
     }

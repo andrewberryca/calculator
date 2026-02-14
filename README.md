@@ -33,25 +33,49 @@ The binary is output to `target/release/calc.exe`.
 
 Or double-click `calc.exe` from the file explorer. The console window is hidden in release builds.
 
+## Testing
+
+The project includes unit tests and integration tests.
+
+```sh
+cargo test
+```
+
 ## Layout
 
 ```
-┌──────────────────────────────────────┐
-│                          History >>  │
-│                        3 + 5 =       │
-│                               8      │
-│                                      │
-│  [ %  ] [ CE ] [  C ] [ DEL ]       │
-│  [1/x ] [ x² ] [ √x ] [  ÷ ]       │
-│  [  7  ] [  8 ] [  9 ] [  × ]       │
-│  [  4  ] [  5 ] [  6 ] [  − ]       │
-│  [  1  ] [  2 ] [  3 ] [  + ]       │
-│  [ +/- ] [  0 ] [  . ] [  = ]       │
-└──────────────────────────────────────┘
++--------------------------------------+
+|                          History >>   |
+|                        3 + 5 =       |
+|                               8      |
+|                                      |
+|  [ %  ] [ CE ] [  C ] [ DEL ]       |
+|  [1/x ] [ x2 ] [ Vx ] [  /  ]      |
+|  [  7  ] [  8 ] [  9 ] [  x  ]      |
+|  [  4  ] [  5 ] [  6 ] [  -  ]      |
+|  [  1  ] [  2 ] [  3 ] [  +  ]      |
+|  [ +/- ] [  0 ] [  . ] [  =  ]      |
++--------------------------------------+
 ```
+
+## Project Structure
+
+```
+calculator/
+  Cargo.toml
+  src/
+    lib.rs          # Core calculator logic, history persistence, and unit tests
+    main.rs         # GUI application using eframe/egui
+  tests/
+    integration_test.rs  # Integration tests
+```
+
+- **`src/lib.rs`** contains the `CalcApp` struct with all calculator operations (digit input, operators, compute, clear, backspace, sign toggle, percent), the `HistoryEntry` type, number formatting, and history file I/O. All unit tests live here.
+- **`src/main.rs`** wraps `CalcApp` in a thin GUI shell that implements `eframe::App`, rendering the display, button grid, and collapsible history panel.
+- **`tests/integration_test.rs`** exercises the calculator library through multi-step operation sequences.
 
 ## Tech Stack
 
-- **[eframe](https://crates.io/crates/eframe)** v0.29 — native app framework
-- **[egui](https://crates.io/crates/egui)** — immediate mode GUI
+- **[eframe](https://crates.io/crates/eframe)** v0.29 -- native app framework
+- **[egui](https://crates.io/crates/egui)** -- immediate mode GUI
 - **glow** (OpenGL) renderer for broad GPU compatibility
