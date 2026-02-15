@@ -52,6 +52,10 @@ pub struct CalcApp {
     pub just_computed: bool,
     pub history: Vec<HistoryEntry>,
     pub show_history: bool,
+    /// Easter egg: triggers when result is 420
+    pub blaze_it: bool,
+    pub blaze_start: Option<std::time::Instant>,
+    pub blaze_sound_played: bool,
 }
 
 impl CalcApp {
@@ -65,6 +69,9 @@ impl CalcApp {
             just_computed: false,
             history: load_history(),
             show_history: false,
+            blaze_it: false,
+            blaze_start: None,
+            blaze_sound_played: false,
         }
     }
 
@@ -162,6 +169,10 @@ impl CalcApp {
                         let result_str = format_number(r);
                         self.add_history(expr, result_str.clone());
                         self.display = result_str;
+                        if r == 420.0 {
+                            self.blaze_it = true;
+                            self.blaze_start = Some(std::time::Instant::now());
+                        }
                     }
                     None => {
                         self.display = "Error".to_string();
@@ -183,6 +194,9 @@ impl CalcApp {
         self.operator = None;
         self.waiting_for_second = false;
         self.just_computed = false;
+        self.blaze_it = false;
+        self.blaze_start = None;
+        self.blaze_sound_played = false;
     }
 
     pub fn clear(&mut self) {
